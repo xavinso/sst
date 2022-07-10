@@ -4,7 +4,6 @@ import {
   getGraphQLParameters,
   processRequest,
   Request,
-  shouldRenderGraphiQL,
 } from "graphql-helix";
 
 import {
@@ -13,10 +12,6 @@ import {
   APIGatewayProxyHandlerV2,
 } from "aws-lambda";
 import { GraphQLSchema } from "graphql";
-import {
-  IExecutableSchemaDefinition,
-  makeExecutableSchema,
-} from "@graphql-tools/schema";
 
 type HandlerConfig<C> = {
   formatPayload?: (params: FormatPayloadParams<C, any>) => any;
@@ -25,22 +20,9 @@ type HandlerConfig<C> = {
     context: Context;
     execution: ExecutionContext;
   }) => Promise<C>;
-} & (
-  | { schema: GraphQLSchema }
-  | {
-      resolvers: IExecutableSchemaDefinition<C>["resolvers"];
-      typeDefs: IExecutableSchemaDefinition<C>["typeDefs"];
-    }
-);
+} & { schema: GraphQLSchema };
 
 export function createGQLHandler<T>(config: HandlerConfig<T>) {
-  const schema =
-    "schema" in config
-      ? config.schema
-      : makeExecutableSchema({
-          typeDefs: config.typeDefs,
-          resolvers: config.resolvers,
-        });
   const handler: APIGatewayProxyHandlerV2 = async (event, context) => {
     const request: Request = {
       body: event.body ? JSON.parse(event.body) : undefined,
@@ -49,14 +31,6 @@ export function createGQLHandler<T>(config: HandlerConfig<T>) {
       headers: event.headers,
     };
 
-    if (shouldRenderGraphiQL(request)) {
-      return {
-        statusCode: 302,
-        headers: {
-          Location: `https://studio.apollographql.com/sandbox/explorer?endpoint=https://${event.requestContext.domainName}`,
-        },
-      };
-    }
     const { operationName, query, variables } = getGraphQLParameters(request);
 
     // Validate and execute the query
@@ -65,7 +39,7 @@ export function createGQLHandler<T>(config: HandlerConfig<T>) {
       query,
       variables,
       request,
-      schema,
+      schema: config.schema,
       formatPayload: config.formatPayload as any,
       contextFactory: async (execution) => {
         if (config.context) {
